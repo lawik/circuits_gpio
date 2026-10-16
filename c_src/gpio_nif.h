@@ -57,6 +57,12 @@ enum drive_mode {
     DRIVE_OPEN_SOURCE
 };
 
+// Bump GPIO_NIF_ABI whenever struct gpio_priv, struct gpio_pin, struct
+// gpio_config, the HAL priv structs or the cdev poller messages change layout.
+// A hot code upgrade between libraries with different ABIs is refused and
+// behaves like it did before upgrade support existed.
+#define GPIO_NIF_ABI "gpio_nif_abi_1"
+
 struct gpio_priv {
     ErlNifResourceType *gpio_pin_rt;
     ErlNifMutex *gpio_pins_lock;
@@ -172,6 +178,22 @@ int hal_load(void *hal_priv);
  * @param hal_priv private state
  */
 void hal_unload(void *hal_priv);
+
+/**
+ * Hot code upgrade: adopt the state of the previous library's HAL
+ *
+ * Called after hal_load() on the new library's hal_priv. Every pin in
+ * `pins` has already been moved to the new library and points at the new
+ * hal_priv. The old library's hal_unload() runs later, when the old code
+ * is purged.
+ *
+ * @param hal_priv the new library's (already loaded) HAL state
+ * @param old_hal_priv the previous library's HAL state
+ * @param pins the list of open pins (linked by `next`)
+ *
+ * @return 0 on success
+ */
+int hal_upgrade(void *hal_priv, void *old_hal_priv, struct gpio_pin *pins);
 
 /**
  * Open up and initialize a GPIO.

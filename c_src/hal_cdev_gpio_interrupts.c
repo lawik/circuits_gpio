@@ -294,3 +294,17 @@ int update_polling_thread(struct gpio_pin *pin)
     }
     return 0;
 }
+
+int remove_from_polling_thread(struct hal_cdev_gpio_priv *priv, int fd)
+{
+    struct gpio_monitor_info message;
+    memset(&message, 0, sizeof(message));
+    message.trigger = TRIGGER_NONE;
+    message.fd = fd;
+
+    if (write(priv->pipe_fds[1], &message, sizeof(message)) != sizeof(message)) {
+        error("Error writing polling thread!");
+        return -EIO;
+    }
+    return 0;
+}

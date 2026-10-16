@@ -236,6 +236,27 @@ void hal_unload(void *hal_priv)
     enif_thread_join(priv->poller_tid, NULL);
 }
 
+int hal_upgrade(void *hal_priv, void *old_hal_priv, struct gpio_pin *pins)
+{
+    (void) hal_priv;
+    debug("hal_upgrade");
+
+    // Hand each listening pin from the old poller thread to the new one. The
+    // old thread keeps running (with the old library's code) until the old
+    // library is unloaded, so stop it watching first. Events that arrive in
+    // between stay queued on the line request fd.
+    int rc = 0;
+    for (struct gpio_pin *pin = pins; pin; pin = pin->next) {
+        if (pin->config.trigger == TRIGGER_NONE)
+            continue;
+
+        if (remove_from_polling_thread(old_hal_priv, pin->fd) < 0 ||
+            update_polling_thread(pin) < 0)
+            rc = -1;
+    }
+    return rc;
+}
+
 int hal_open_gpio(struct gpio_pin *pin,
                   ErlNifEnv *env)
 {

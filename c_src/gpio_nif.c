@@ -217,9 +217,8 @@ bool emit_gpio_change(ErlNifEnv *env,
         return send_gpio_message(env, msg_env, notify_term, pid, timestamp, new_bit);
 }
 
-static int load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM info)
+static int load_common(ErlNifEnv *env, void **priv_data, ErlNifResourceFlags flags)
 {
-    (void) info;
 #ifdef DEBUG
 #ifdef LOG_PATH
     log_location = fopen(LOG_PATH, "w");
@@ -247,7 +246,21 @@ static int load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM info)
         return 1;
     }
 
-    priv->gpio_pin_rt = enif_open_resource_type_x(env, "gpio_pin", &gpio_pin_init, ERL_NIF_RT_CREATE, NULL);
+    priv->gpio_pin_rt = enif_open_resource_type_x(env, "gpio_pin", &gpio_pin_init, flags, NULL);
+    if (!priv->gpio_pin_rt) {
+        error("Can't open gpio_pin resource type");
+        enif_free(priv);
+        return 1;
+    }
+
+    // Marker for the struct layouts this library uses. It's never allocated.
+    // On upgrade, TAKEOVER-only succeeds only if the old library registered
+    // the same ABI.
+    if (!enif_open_resource_type(env, NULL, GPIO_NIF_ABI, NULL, flags, NULL)) {
+        error("Previous library has a different ABI. Not upgrading.");
+        enif_free(priv);
+        return 1;
+    }
     priv->gpio_pins_lock = enif_mutex_create("gpio_pins");
     priv->gpio_pins = NULL;
 
@@ -265,6 +278,44 @@ static int load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM info)
     }
 
     *priv_data = (void *) priv;
+    return 0;
+}
+
+static int load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM info)
+{
+    (void) info;
+    return load_common(env, priv_data, ERL_NIF_RT_CREATE);
+}
+
+static int upgrade(ErlNifEnv *env, void **priv_data, void **old_priv_data, ERL_NIF_TERM info)
+{
+    (void) info;
+    debug("upgrade");
+
+    struct gpio_priv *old_priv = *old_priv_data;
+    if (!old_priv)
+        return 1;
+
+    // TAKEOVER-only for the ABI marker: refuse unless the old library uses
+    // the same layouts. Failing here rolls back the resource type takeovers.
+    if (load_common(env, priv_data, ERL_NIF_RT_TAKEOVER))
+        return 1;
+
+    struct gpio_priv *priv = *priv_data;
+
+    // Move the open pins to the new library. Their destructors now run in
+    // this library and look up the new priv data.
+    enif_mutex_lock(old_priv->gpio_pins_lock);
+    priv->gpio_pins = old_priv->gpio_pins;
+    old_priv->gpio_pins = NULL;
+    for (struct gpio_pin *pin = priv->gpio_pins; pin; pin = pin->next)
+        pin->hal_priv = &priv->hal_priv;
+    enif_mutex_unlock(old_priv->gpio_pins_lock);
+
+    if (hal_upgrade(&priv->hal_priv, &old_priv->hal_priv, priv->gpio_pins) < 0) {
+        error("HAL upgrade failed");
+        // Too late to undo cleanly. The pins work, but interrupts may not.
+    }
     return 0;
 }
 
@@ -769,4 +820,4 @@ static ErlNifFunc nif_funcs[] = {
     {"enumerate", 0, gpio_enumerate, 0}
 };
 
-ERL_NIF_INIT(Elixir.Circuits.GPIO.Nif, nif_funcs, load, NULL, NULL, unload)
+ERL_NIF_INIT(Elixir.Circuits.GPIO.Nif, nif_funcs, load, NULL, upgrade, unload)

@@ -18,5 +18,6 @@ struct gpio_pin;
 
 void *gpio_poller_thread(void *arg);
 int update_polling_thread(struct gpio_pin *pin);
+int remove_from_polling_thread(struct hal_cdev_gpio_priv *priv, int fd);
 
 #endif // HAL_CDEV_GPIO_H

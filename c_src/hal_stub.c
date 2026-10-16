@@ -65,6 +65,22 @@ void hal_unload(void *hal_priv)
     (void) hal_priv;
 }
 
+int hal_upgrade(void *hal_priv, void *old_hal_priv, struct gpio_pin *pins)
+{
+    (void) pins;
+
+    // The simulated line state lives in the HAL priv. owner[] points at pins,
+    // which didn't move.
+    struct stub_priv *stub_priv = (struct stub_priv *) hal_priv;
+    struct stub_priv *old_stub_priv = (struct stub_priv *) old_hal_priv;
+
+    memcpy(stub_priv->in_use, old_stub_priv->in_use, sizeof(stub_priv->in_use));
+    memcpy(stub_priv->value, old_stub_priv->value, sizeof(stub_priv->value));
+    memcpy(stub_priv->owner, old_stub_priv->owner, sizeof(stub_priv->owner));
+    atomic_store(&stub_priv->pins_open, atomic_load(&old_stub_priv->pins_open));
+    return 0;
+}
+
 // Return the global line index base for a gpiochip, or -1 if unknown.
 static int chip_base(const char *gpiochip)
 {
