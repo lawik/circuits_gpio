@@ -253,9 +253,7 @@ static int load_common(ErlNifEnv *env, void **priv_data, ErlNifResourceFlags fla
         return 1;
     }
 
-    // Marker for the struct layouts this library uses. It's never allocated.
-    // On upgrade, TAKEOVER-only succeeds only if the old library registered
-    // the same ABI.
+    // Never allocated. Only marks the ABI so that upgrades can check it.
     if (!enif_open_resource_type(env, NULL, GPIO_NIF_ABI, NULL, flags, NULL)) {
         error("Previous library has a different ABI. Not upgrading.");
         enif_free(priv);
@@ -296,15 +294,13 @@ static int upgrade(ErlNifEnv *env, void **priv_data, void **old_priv_data, ERL_N
     if (!old_priv)
         return 1;
 
-    // TAKEOVER-only for the ABI marker: refuse unless the old library uses
-    // the same layouts. Failing here rolls back the resource type takeovers.
+    // Take over the old library's resources. Fails if its ABI is different.
     if (load_common(env, priv_data, ERL_NIF_RT_TAKEOVER))
         return 1;
 
     struct gpio_priv *priv = *priv_data;
 
-    // Move the open pins to the new library. Their destructors now run in
-    // this library and look up the new priv data.
+    // Move the open pins over. Their destructors now run in this library.
     enif_mutex_lock(old_priv->gpio_pins_lock);
     priv->gpio_pins = old_priv->gpio_pins;
     old_priv->gpio_pins = NULL;
@@ -312,10 +308,10 @@ static int upgrade(ErlNifEnv *env, void **priv_data, void **old_priv_data, ERL_N
         pin->hal_priv = &priv->hal_priv;
     enif_mutex_unlock(old_priv->gpio_pins_lock);
 
-    if (hal_upgrade(&priv->hal_priv, &old_priv->hal_priv, priv->gpio_pins) < 0) {
+    // Too late to fail. Pins still work, but interrupts may not.
+    if (hal_upgrade(&priv->hal_priv, &old_priv->hal_priv, priv->gpio_pins) < 0)
         error("HAL upgrade failed");
-        // Too late to undo cleanly. The pins work, but interrupts may not.
-    }
+
     return 0;
 }
 

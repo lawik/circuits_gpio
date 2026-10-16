@@ -69,8 +69,6 @@ int hal_upgrade(void *hal_priv, void *old_hal_priv, struct gpio_pin *pins)
 {
     (void) pins;
 
-    // The simulated line state lives in the HAL priv. owner[] points at pins,
-    // which didn't move.
     struct stub_priv *stub_priv = (struct stub_priv *) hal_priv;
     struct stub_priv *old_stub_priv = (struct stub_priv *) old_hal_priv;
 
